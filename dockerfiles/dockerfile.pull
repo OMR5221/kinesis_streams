@@ -1,0 +1,15 @@
+FROM ubuntu:16.04
+
+MAINTAINER Oswald Ramirez "Oswald.Ramirez"
+
+RUN apt-get update -y && \
+    apt-get install -y python-pip python-dev && \
+    pip install --upgrade pip
+	
+	
+ADD . /myapp
+COPY . /myapp
+WORKDIR /myapp
+RUN pip install -r requirements.txt
+ENTRYPOINT [ "python" ]
+CMD ["application.py"]

@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Run ESBI Stream Docker App Producer Code in EC2Instance
+
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access into the Airflow web server
+    Default: esbi-dev
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair
+# Mapping to find the Amazon Linux AMI in each region.
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-97785bed
+    us-east-2:
+      AMI: ami-f63b1193
+    us-west-1:
+      AMI: ami-824c4ee2
+    us-west-2:
+      AMI: ami-f2d3638a
+    ca-central-1:
+      AMI: ami-a954d1cd
+    eu-west-1:
+      AMI: ami-d834aba1
+    eu-west-2:
+      AMI: ami-403e2524
+    eu-west-3:
+      AMI: ami-8ee056f3
+    eu-central-1:
+      AMI: ami-5652ce39
+    sa-east-1:
+      AMI: ami-84175ae8
+    ap-south-1:
+      AMI: ami-531a4c3c
+    ap-southeast-1:
+      AMI: ami-68097514
+    ap-southeast-2:
+      AMI: ami-942dd1f6
+    ap-northeast-1:
+      AMI: ami-ceafcba8
+    ap-northeast-2:
+      AMI: ami-863090e8
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref 'KeyName'
+      SecurityGroups: [!Ref 'ESBIProducerAFEC2SecurityGroup']
+      InstanceType: 'm4.xlarge'
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      Tags:
+        -
+          Key: Name
+          Value: ESBIAppProducer
+      ImageId: !FindInMap
+        - RegionMap
+        - !Ref 'AWS::Region'
+        - AMI
+      UserData:
+        Fn::Base64: !Sub |
+         #!/bin/bash
+         set -x
+         # Run update 
+         sudo yum update -y
+         exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+         # Get the latest CloudFormation package
+         echo "Installing aws-cfn"
+         yum install -y aws-cfn-bootstrap
+         # Start cfn-init
+         /opt/aws/bin/cfn-init -v -c install --stack ${AWS::StackId} --resource EC2Instance --region ${AWS::Region}
+         # Install docker
+         sudo yum install -y docker
+         # Allow ec2-user to run docker commands:
+         sudo usermod -a -G docker ec2-user
+         # Refresh bash_profile
+         source /home/ec2-user/.bash_profile
+         # Start the docker service:
+         sudo service docker start
+         # Pull docker hub repo code:
+         # sudo docker image pull omrdocker23679877/teststreamapp:v1
+         # Pull and Run the docker app:
+         sudo docker run --rm omrdocker23679877/teststreamapp:v1
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          install:
+            - gcc
+        gcc:
+          packages:
+            yum:
+              gcc: []
+    DependsOn:
+      - ESBIProducerAFEC2SecurityGroup
+  ESBIProducerAFEC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ESBIProducerAirflowEC2SG
+      GroupDescription: Enable HTTP access via port 80 + SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ESBIProducerInstanceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonKinesisFirehoseFullAccess
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: ESBIProducerInstanceProfile
+      Roles:
+        -
+          Ref: EC2Role
+Outputs:
+  AirflowEC2PublicDNSName:
+    Description: Public DNS Name of the ESBI App Producer EC2 instance
+    Value: !Join ["", ["http://", !GetAtt EC2Instance.PublicDnsName, ":8080"]]

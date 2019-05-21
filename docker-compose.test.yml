@@ -1,0 +1,14 @@
+version: '2'
+services:
+  webserver:
+      image: puckel/docker-airflow:1.8.0
+      restart: always
+      environment:
+          - LOAD_EX=n
+          - EXECUTOR=Local
+      volumes:
+          - ./examples/etl-example/dags:/usr/local/airflow/dags
+          - ./examples/etl-example/sql:/usr/local/airflow/sql
+      ports:
+          - 8080:8080
+      command: webserver
